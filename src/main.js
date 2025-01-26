@@ -1,50 +1,43 @@
 /**
- * 单词本插件
+ * 欧路词典单词本插件
  */
 
-// 有道单词本
-var YOUDAO_ADD_WORD_URL = "https://dict.youdao.com/wordbook/webapi/v2/ajax/add?lan=en&word=";
+// 欧路词典 API
+const EUDIC_ADD_WORD_URL = "https://api.frdic.com/api/open/v1/studylist/words";
+const EUDIC_BOOK_LIST_URL = "https://api.frdic.com/api/open/v1/studylist/category?language=en";
+const DICTIONARY_API = "https://api.dictionaryapi.dev/api/v2/entries/en/";
 
-// 扇贝单词本
-var SHANBAY_ADD_WORD_URL = "https://apiv3.shanbay.com/wordscollection/words_bulk_upload"
-
-// 欧路单词本
-var EUDIC_ADD_WORD_URL = "https://api.frdic.com/api/open/v1/studylist/words";
-var EUDIC_BOOK_LIST_URL = "https://api.frdic.com/api/open/v1/studylist/category?language=en";
+// 单词格式验证正则表达式
+const WORD_PATTERN = /^[a-zA-Z]+(-[a-zA-Z]+)*$/;
 
 function buildResult(res) {
-    var result = {
+    return {
         "from": "en",
         "to": "zh-Hans",
         "toParagraphs": [res],
-        "fromParagraphs": [
-            "success add to word book"
-        ]
-    }
-    return result;
+        "fromParagraphs": ["success add to word book"]
+    };
 }
 
 function buildError(res) {
-    var result = {
+    return {
         'type': 'param',
         'message': res,
         'addtion': '无'
-    }
-    return result;
+    };
 }
 
-// override
+// 支持的语言
 function supportLanguages() {
     return ['zh-Hans', 'en'];
 }
 
-// override
+// 验证插件配置
 function pluginValidate(completion) {
-    var selected_dict = $option.dict_type;
-    var authorization = $option.authorization;
-    if (authorization) {
-        doValidate(selected_dict, authorization, completion);
-    } else {
+    const authorization = $option.authorization;
+    const wordbook_id = $option.wordbook_id;
+
+    if (!authorization) {
         completion({
             result: false,
             error: {
@@ -53,40 +46,36 @@ function pluginValidate(completion) {
                 troubleshootingLink: "https://github.com/yuhaowin/wordbook-bob-plugin"
             }
         });
+        return;
+    }
+
+    if (!wordbook_id) {
+        queryEudicWordbookIds(authorization, completion);
+    } else {
+        // 使用测试单词验证配置
+        addWordEudic(authorization, 'test', wordbook_id, function (res) {
+            if (201 === res.response.statusCode) {
+                completion({result: true});
+            } else {
+                queryEudicWordbookIds(authorization, completion);
+            }
+        });
     }
 }
 
-function doValidate(selected_dict, authorization, completion) {
-
-    // 验证欧路词典配置参数
-    if (selected_dict == 2) {
-        var wordbook_id = $option.wordbook_id
-        if (!wordbook_id) {
-            queryEudicWordbookIds(authorization, completion)
-        } else {
-            addWordEudic(authorization, 'test', wordbook_id, function (res) {
-                if (201 === res.response.statusCode) {
-                    completion({result: true});
-                } else {
-                    queryEudicWordbookIds(authorization, completion)
-                }
-            });
-        }
-    }
-}
-
+// 查询欧路词典单词本列表
 function queryEudicWordbookIds(token, completion) {
     $http.get({
         url: EUDIC_BOOK_LIST_URL,
         header: {
             'Authorization': token,
             'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 11_1_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 11_1_0) AppleWebKit/537.36'
         },
         handler: function (res) {
-            var statusCode = res.response.statusCode;
+            const statusCode = res.response.statusCode;
             if (statusCode === 200) {
-                var data = res.data.data;
+                const data = res.data.data;
                 completion({
                     result: false,
                     error: {
@@ -103,116 +92,114 @@ function queryEudicWordbookIds(token, completion) {
                         troubleshootingLink: "https://github.com/yuhaowin/wordbook-bob-plugin"
                     }
                 });
-                $log.info('接口返回值 data : ' + JSON.stringify(data));
             }
         }
     });
 }
 
-// override
-function translate(query, completion) {
-    var text = query.text;
-    var from_language = query.detectFrom;
-    var selected_dict = $option.dict_type;
-    var word_only = $option.word_only;
-    var authorization = $option.authorization;
-    var need_save = (word_only == 0 || text.search(' ') < 1);
-    if (from_language != 'en' || !need_save) {
-        completion({'result': buildResult("中文、非英语单词无需添加单词本")});
-        return;
+// 本地验证单词格式
+function isValidWordFormat(word) {
+    // 检查基本格式（只包含字母和连字符）
+    if (!WORD_PATTERN.test(word)) {
+        return false;
     }
-    if (authorization) {
-        addWord(selected_dict, authorization, text, completion);
-    } else {
-        completion({'error': buildError('「认证信息」缺失')});
+    
+    // 检查长度（避免过长的无意义字符串）
+    if (word.length > 45) {
+        return false;
     }
+
+    return true;
 }
 
-function addWord(selected_dict, authorization, word, completion) {
-    if (selected_dict == 1) { // 保存有道单词本
-        addWordYoudao(authorization, word, completion);
-    }
-    if (selected_dict == 2) { // 保存欧路单词本
-        var wordbook_id = $option.wordbook_id;
-        addWordEudic(authorization, word, wordbook_id, function (res) {
-            if (201 === res.response.statusCode) {
-                completion({'result': buildResult("添加单词成功")});
-            } else {
-                completion({'error': buildError('欧路词典 token 错误或过期，请重新填写。')});
-                $log.info('addWord 接口返回值 data : ' + JSON.stringify(res.data));
+// 在线验证单词
+function validateWordOnline(word) {
+    return new Promise((resolve) => {
+        $http.get({
+            url: DICTIONARY_API + encodeURIComponent(word),
+            handler: function(res) {
+                if (res.response.statusCode === 200 && Array.isArray(res.data) && res.data.length > 0) {
+                    resolve(true);
+                } else {
+                    resolve(false);
+                }
             }
         });
-    }
-    if (selected_dict == 3) { // 保存扇贝单词本
-        addWordShanbay(authorization, word, completion);
-    }
-}
-
-function addWordYoudao(cookie, word, completion) {
-    $http.get({
-        url: YOUDAO_ADD_WORD_URL + encodeURIComponent(word),
-        header: {
-            'Cookie': cookie,
-            'Host': 'dict.youdao.com',
-            'Upgrade-Insecure-Requests': 1,
-            'Accept-Encoding': 'gzip, deflate',
-            'Accept-Language': 'zh-CN,zh;q=0.9',
-            'Accept': 'application/json, text/plain, */*',
-            'Referer': 'https://dict.youdao.com',
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 11_1_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36'
-        },
-        handler: function (res) {
-            var data = res.data;
-            if (data.code === 0) {
-                completion({'result': buildResult("添加单词成功")});
-            } else {
-                completion({'error': buildError('有道词典 cookie 错误或过期，请重新填写。')});
-                $log.info('addWord 接口返回值 data : ' + JSON.stringify(data));
-            }
-        }
     });
 }
 
+// 添加单词到欧路词典
 function addWordEudic(token, word, wordbook_id, handler) {
     $http.post({
         url: EUDIC_ADD_WORD_URL,
         header: {
             'Authorization': token,
             'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 11_1_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 11_1_0) AppleWebKit/537.36'
         },
         body: {
-            "id": wordbook_id, // 单词本 id
+            "id": wordbook_id,
             "language": "en",
-            "words": [
-                word
-            ]
+            "words": [word]
         },
         handler: handler
     });
 }
 
-function addWordShanbay(token, word, completion) {
-    $http.post({
-        url: SHANBAY_ADD_WORD_URL,
-        header: {
-            "Cookie": `auth_token=${token}`,
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 11_1_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36'
-        },
-        body: {
-            "business_id": 6,
-            "words": [
-                word
-            ]
-        },
-        handler: function (res) {
-            if (res.response.statusCode === 200) {
-                completion({'result': buildResult("添加单词本成功")});
+// 主要翻译处理函数
+// 修改 translate 函数，移除 async
+function translate(query, completion) {
+    const text = query.text.trim().toLowerCase();
+    const from_language = query.detectFrom;
+    const word_only = $option.word_only;
+    const authorization = $option.authorization;
+    const wordbook_id = $option.wordbook_id;
+    const need_save = (word_only == 0 || text.search(' ') < 1);
+
+    if (from_language != 'en' || !need_save) {
+        completion({'result': buildResult("中文、非英语单词无需添加单词本")});
+        return;
+    }
+
+    if (!authorization || !wordbook_id) {
+        completion({'error': buildError('认证信息或单词本 ID 缺失')});
+        return;
+    }
+
+    // 第一步：检查单词格式
+    if (!isValidWordFormat(text)) {
+        completion({'error': buildError(`"${text}" 格式不符合英文单词规范`)});
+        return;
+    }
+
+    // 第二步：在线验证单词
+    validateWordOnline(text).then(isValid => {
+        if (!isValid) {
+            completion({'error': buildError(`"${text}" 不是有效的英文单词`)});
+            return;
+        }
+
+        // 添加到欧路词典单词本
+        addWordEudic(authorization, text, wordbook_id, function (res) {
+            if (201 === res.response.statusCode) {
+                completion({'result': buildResult("添加单词成功")});
             } else {
-                completion({'error': buildError('扇贝词典 auth_token 错误或过期，请重新填写。')});
-                $log.info('接口返回值 data : ' + JSON.stringify(data));
+                completion({'error': buildError('添加单词失败，请检查认证信息是否有效')});
             }
+        });
+    }).catch(error => {
+        $log.error('验证单词时出错：' + error);
+        // 如果在线验证失败，仍然允许添加符合基本格式的单词
+        if (isValidWordFormat(text)) {
+            addWordEudic(authorization, text, wordbook_id, function (res) {
+                if (201 === res.response.statusCode) {
+                    completion({'result': buildResult("添加单词成功")});
+                } else {
+                    completion({'error': buildError('添加单词失败，请检查认证信息是否有效')});
+                }
+            });
+        } else {
+            completion({'error': buildError('验证单词时出错，且输入不符合单词格式')});
         }
     });
 }
