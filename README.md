@@ -2,6 +2,10 @@
 
 ## 使用
 
+https://github.com/Lincest/eudic-wordbook-bob-plugin/releases/
+
+## 本地 build / dev
+
 ```shell
 bash release.sh
 ```
